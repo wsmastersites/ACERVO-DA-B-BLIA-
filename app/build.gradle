@@ -1,3 +1,4 @@
+
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
@@ -10,7 +11,7 @@ android {
     defaultConfig {
         applicationId 'br.com.acervodabiblia.reader'
         minSdk 23
-        targetSdk 35
+        targetSdk 32
         versionCode 1
         versionName '1.0'
     }
