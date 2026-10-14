@@ -1,165 +1,25 @@
-<!doctype html>
-<html lang="pt-BR">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<meta name="color-scheme" content="light dark">
-<title>Acervo da Bíblia</title>
-<style>
-:root{--bg:#f5f1e8;--panel:#fffdf8;--fg:#25251f;--muted:#77766e;--accent:#596b50;--line:#ded8cb}
-body.dark{--bg:#171916;--panel:#22251f;--fg:#e8e5dc;--muted:#aaa99f;--accent:#b8c6a6;--line:#3b4037}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,sans-serif}
-header{padding:20px 18px 14px;background:var(--panel);border-bottom:1px solid var(--line)}
-.brand{font-size:22px;font-weight:750;letter-spacing:-.4px}
-.sub{font-size:13px;color:var(--muted);margin-top:4px}
-main{max-width:760px;margin:auto;padding:18px}
-button,.filelabel{border:0;border-radius:10px;padding:12px 15px;background:var(--accent);color:#fff;font-weight:650;font-size:14px;cursor:pointer}
-.controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
-.controls button.secondary{background:var(--panel);border:1px solid var(--line);color:var(--fg)}
-#picker{display:none}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
-h2{font-size:17px;margin:0 0 10px}
-p{line-height:1.6}
-.muted{color:var(--muted);font-size:13px}
-#libraryList{display:grid;gap:8px}
-.book{padding:12px;border:1px solid var(--line);border-radius:10px;display:flex;align-items:center;justify-content:space-between;gap:10px}
-.book button{padding:8px 10px}
-#reader{display:none}
-#readerTop{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px}
-#bookTitle{font-weight:700}
-#viewer{height:60vh;min-height:330px;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px}
-#viewer iframe{border:0;width:100%;min-height:100%;background:transparent}
-#viewer .epub-container{width:100%}
-.readerControls{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap;margin-top:12px}
-.readerControls button{min-width:44px}
-#status{margin:12px 0;color:var(--muted);font-size:13px}
-a{color:var(--accent)}
-</style>
-</head>
-<body>
-<header>
-  <div class="brand">Acervo da Bíblia</div>
-  <div class="sub">Sua biblioteca de leitura</div>
-</header>
-<main>
-  <section id="library">
-    <div class="controls">
-      <button id="addBtn">＋ Importar EPUB</button>
-      <button class="secondary" id="themeBtn">☾ Modo escuro</button>
-      <input id="picker" type="file" accept=".epub,application/epub+zip">
-    </div>
-    <div class="card">
-      <h2>Minha biblioteca</h2>
-      <p class="muted">Importe um livro EPUB salvo no celular. Seus livros e o progresso ficam armazenados neste aparelho.</p>
-      <div id="libraryList"></div>
-      <p id="empty" class="muted">Nenhum livro importado ainda.</p>
-    </div>
-  </section>
-  <section id="reader">
-    <div id="readerTop">
-      <button class="secondary" id="backBtn">← Biblioteca</button>
-      <span id="bookTitle"></span>
-    </div>
-    <div class="controls">
-      <button class="secondary" id="smaller">A−</button>
-      <button class="secondary" id="larger">A＋</button>
-      <button class="secondary" id="readerTheme">Tema</button>
-    </div>
-    <div id="viewer"></div>
-    <div class="readerControls">
-      <button id="prevBtn">← Anterior</button>
-      <button id="nextBtn">Próximo →</button>
-    </div>
-    <div id="status"></div>
-  </section>
-</main>
-<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/epubjs@0.3.93/dist/epub.min.js"></script>
-<script>
-(function(){
- const $=id=>document.getElementById(id);
- let books=JSON.parse(localStorage.getItem('adb_books')||'[]');
- let dbPromise = new Promise((resolve,reject)=>{
-   const req=indexedDB.open('AcervoBibliaDB',1);
-   req.onupgradeneeded=()=>{if(!req.result.objectStoreNames.contains('epubs'))req.result.createObjectStore('epubs')};
-   req.onsuccess=()=>resolve(req.result); req.onerror=()=>reject(req.error);
- });
- async function dbPut(id, bytes){const db=await dbPromise;return new Promise((resolve,reject)=>{const tx=db.transaction('epubs','readwrite');tx.objectStore('epubs').put(bytes,id);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)})}
- async function dbGet(id){const db=await dbPromise;return new Promise((resolve,reject)=>{const tx=db.transaction('epubs','readonly');const req=tx.objectStore('epubs').get(id);req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}
- async function dbDelete(id){const db=await dbPromise;return new Promise((resolve,reject)=>{const tx=db.transaction('epubs','readwrite');tx.objectStore('epubs').delete(id);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)})}
- let current=null, book=null, rendition=null, fontSize=100, currentCfi=null;
- const darkSaved=localStorage.getItem('adb_dark')==='true';
- if(darkSaved) document.body.classList.add('dark');
- function save(){localStorage.setItem('adb_books',JSON.stringify(books))}
- function setTheme(){document.body.classList.toggle('dark');localStorage.setItem('adb_dark',document.body.classList.contains('dark'));$('themeBtn').textContent=document.body.classList.contains('dark')?'☀ Modo claro':'☾ Modo escuro'; if(rendition) applyTheme()}
- $('themeBtn').textContent=document.body.classList.contains('dark')?'☀ Modo claro':'☾ Modo escuro';
- $('themeBtn').onclick=setTheme; $('readerTheme').onclick=setTheme;
- function renderLibrary(){
-   $('libraryList').innerHTML='';
-   $('empty').style.display=books.length?'none':'block';
-   books.sort((a,b)=>(b.lastOpened||0)-(a.lastOpened||0));
-   books.forEach(item=>{
-     const row=document.createElement('div');row.className='book';
-     const info=document.createElement('div');
-     const title=document.createElement('div');title.textContent=item.title||item.name;
-     const sub=document.createElement('div');sub.className='muted';sub.textContent=item.author||'Autor não informado';
-     info.append(title,sub);
-     const open=document.createElement('button');open.textContent='Ler';open.onclick=()=>openBook(item.id);
-     const remove=document.createElement('button');remove.className='secondary';remove.textContent='×';remove.title='Remover';remove.onclick=async()=>{books=books.filter(b=>b.id!==item.id);await dbDelete(item.id);save();renderLibrary()};
-     row.append(info,open,remove);$('libraryList').append(row);
-   });
- }
- $('addBtn').onclick=()=>$('picker').click();
- $('picker').addEventListener('change',async e=>{
-   const file=e.target.files&&e.target.files[0];if(!file)return;
-   if(!file.name.toLowerCase().endsWith('.epub')){alert('Selecione um arquivo .epub.');e.target.value='';return}
-   try{
-     const buffer=await file.arrayBuffer();
-     // Verify that the selected file is a readable EPUB archive.
-     const zip=await JSZip.loadAsync(buffer);
-     if(!zip.file('META-INF/container.xml'))throw new Error('O arquivo não parece ser um EPUB válido.');
-     const id='book_'+Date.now();
-     await dbPut(id, buffer);
-     const stored={id,name:file.name,title:file.name.replace(/\.epub$/i,''),author:'',lastOpened:Date.now(),cfi:null};
-     books.unshift(stored);save();renderLibrary();await openBook(id);
-   }catch(err){alert('Não foi possível importar este EPUB. Verifique se o arquivo está íntegro.\n'+err.message)}
-   e.target.value='';
- });
- async function openBook(id){
-   const item=books.find(b=>b.id===id);if(!item)return;
-   try{
-     if(rendition){rendition.destroy();rendition=null} if(book){book.destroy();book=null}
-     current=item; $('library').style.display='none';$('reader').style.display='block';
-     $('bookTitle').textContent=item.title||item.name;$('viewer').innerHTML='';$('status').textContent='Abrindo livro…';
-     const savedBytes=await dbGet(item.id); if(!savedBytes)throw new Error('Arquivo EPUB não encontrado. Importe o livro novamente.'); const bytes=new Uint8Array(savedBytes);
-     book=ePub(bytes);
-     rendition=book.renderTo('viewer',{width:'100%',height:'100%',flow:'paginated',spread:'none',manager:'default'});
-     applyTheme();
-     book.loaded.metadata.then(meta=>{item.title=meta.title||item.title;item.author=meta.creator||'';$('bookTitle').textContent=item.title;save()});
-     rendition.on('relocated',location=>{
-       currentCfi=location.start.cfi;item.cfi=currentCfi;item.lastOpened=Date.now();save();
-       const pct=location.start.percentage?Math.round(location.start.percentage*100):0;
-       $('status').textContent='Progresso aproximado: '+pct+'%';renderLibrary();
-     });
-     await rendition.display(item.cfi||undefined);
-     item.lastOpened=Date.now();save();renderLibrary();
-   }catch(err){alert('Erro ao abrir o EPUB: '+err.message);backToLibrary()}
- }
- function applyTheme(){
-   if(!rendition)return;
-   const dark=document.body.classList.contains('dark');
-   rendition.themes.default({body:{color:dark?'#e8e5dc':'#25251f','background-color':dark?'#22251f':'#fffdf8','font-size':fontSize+'%','line-height':'1.7','padding':'0 4px'}});
- }
- function backToLibrary(){if(rendition){rendition.destroy();rendition=null}if(book){book.destroy();book=null}current=null;$('reader').style.display='none';$('library').style.display='block';renderLibrary()}
- $('backBtn').onclick=backToLibrary;
- $('prevBtn').onclick=()=>rendition&&rendition.prev();
- $('nextBtn').onclick=()=>rendition&&rendition.next();
- $('larger').onclick=()=>{fontSize=Math.min(180,fontSize+10);if(rendition)rendition.themes.fontSize(fontSize+'%')};
- $('smaller').onclick=()=>{fontSize=Math.max(70,fontSize-10);if(rendition)rendition.themes.fontSize(fontSize+'%')};
- window.readerBack=()=>{if(current){backToLibrary();return true}return false};
- renderLibrary();
-})();
-</script>
-</body>
-</html>
+
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:allowBackup="true"
+        android:label="Acervo da Bíblia"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar"
+        android:usesCleartextTraffic="false">
+
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+        </activity>
+    </application>
+</manifest>
+
